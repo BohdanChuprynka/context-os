@@ -1,0 +1,7 @@
+interface:
+  display_name: "Dream-Skill"
+  short_description: "Reliably sync durable chat context into Obsidian"
+  default_prompt: "Use $dream-skill --shadow to evaluate recent Claude and Codex conversations without changing my vault."
+
+policy:
+  allow_implicit_invocation: true

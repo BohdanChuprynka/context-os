@@ -1,0 +1,40 @@
+# Copy to ~/.claude/dream-skill/config.toml and replace every placeholder.
+# Keep the real config local: it may contain private vault paths and terms.
+
+reports_dir = "/absolute/path/to/dream-reports"
+
+# Optional read-only health monitoring. Configure current pages and source
+# feeds to alert on missed Dream cadence or stale operational pages.
+# [health]
+# expected_cadence_days = 7
+# cadence_grace_days = 1
+# current_page_stale_days = 7
+# current_pages = ["/absolute/path/to/personal-vault/wiki/Now.md"]
+# source_paths = ["/absolute/private/voice-notes/*.jsonl", "/absolute/private/meeting-notes/*.jsonl"]
+
+# Optional generic local context producer. The command runs once at the start
+# of each fresh Claude/all run; it must atomically maintain ordinary JSONL files
+# under this private root. Keep the root outside Dream home and every vault.
+# [external_context]
+# jsonl_root = "/absolute/private/output/root"
+# refresh_command = ["/absolute/executable", "--quiet"]
+
+[vaults.personal]
+root = "/absolute/path/to/personal-vault"
+description = "Identity, preferences, goals, relationships, and long-lived context."
+# Optional safeguards for vaults where Dream may suggest changes but should
+# never auto-write, or where only selected folders are valid routing targets.
+# review_only = true
+# route_include = ["Notes", "References"]
+# route_exclude = ["Templates", "_archive"]
+
+[vaults.projects]
+root = "/absolute/path/to/projects-vault"
+description = "Repositories, architecture, constraints, and technical decisions."
+
+# Optional deterministic people-routing overrides. Roster pages are discovered
+# from configured vaults; this section only chooses a tie-break and suppresses
+# deployment-specific terms that are not person names.
+[entity_routing]
+preferred_vault = "personal"
+stop_terms = ["Example Organization", "Example Product"]

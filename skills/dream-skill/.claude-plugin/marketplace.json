@@ -1,0 +1,22 @@
+{
+  "$schema": "https://anthropic.com/claude-code/marketplace.schema.json",
+  "name": "dream-skill-marketplace",
+  "description": "Distribution marketplace for reliable Claude Code and Codex to Obsidian synchronization.",
+  "owner": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "plugins": [
+    {
+      "name": "dream-skill",
+      "description": "Sync durable Claude Code and Codex context into Obsidian with transactional review and measurable canaries.",
+      "version": "0.4.0",
+      "source": "./",
+      "category": "productivity",
+      "author": {
+        "name": "Bohdan Chuprynka",
+        "url": "https://github.com/BohdanChuprynka"
+      }
+    }
+  ]
+}

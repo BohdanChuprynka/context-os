@@ -1,0 +1,7 @@
+.DS_Store
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+skills/clean-wiki/skills/clean-wiki/config/vault-paths.toml
+skills/clean-wiki/skills/clean-wiki/data/

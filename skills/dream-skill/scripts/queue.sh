@@ -1,0 +1,249 @@
+#!/usr/bin/env bash
+# dream-skill queue manager.
+# Stores deferred-decision facts for manual review.
+# Three buckets: destructive, uncertain, brainstormed.
+# Queue file: $DREAM_QUEUE_FILE (default ~/.claude/dream-skill/queue/pending.md)
+#
+# Usage:
+#   queue.sh append --bucket <destructive|uncertain|brainstormed> \
+#     --title <t> --evidence <e> --confidence <c> --target <t>
+#   queue.sh list
+
+set -euo pipefail
+umask 077
+
+QUEUE_FILE="${DREAM_QUEUE_FILE:-$HOME/.claude/dream-skill/queue/pending.md}"
+
+die() { echo "queue: $*" >&2; exit 1; }
+
+LOCK_PATH="${QUEUE_FILE}.lock"
+
+acquire_lock() {
+  local retries=100 holder=""
+  mkdir -p "$(dirname "$QUEUE_FILE")"
+  while ! mkdir "$LOCK_PATH" 2>/dev/null; do
+    [ -f "$LOCK_PATH/pid" ] && holder=$(cat "$LOCK_PATH/pid" 2>/dev/null || true)
+    if [ -n "$holder" ] && ! kill -0 "$holder" 2>/dev/null; then
+      rm -rf "$LOCK_PATH" 2>/dev/null || true
+      continue
+    fi
+    retries=$((retries - 1))
+    [ "$retries" -gt 0 ] || die "lock timeout: $QUEUE_FILE"
+    sleep 0.05
+  done
+  printf '%s\n' "$$" > "$LOCK_PATH/pid"
+  trap 'rm -rf "$LOCK_PATH" 2>/dev/null || true' EXIT
+}
+
+ensure_queue_file() {
+  mkdir -p "$(dirname "$QUEUE_FILE")"
+  [ -f "$QUEUE_FILE" ] || touch "$QUEUE_FILE"
+  chmod 700 "$(dirname "$QUEUE_FILE")" 2>/dev/null || true
+  chmod 600 "$QUEUE_FILE" 2>/dev/null || true
+}
+
+bucket_header() {
+  case "$1" in
+    destructive)  echo "## Destructive edits" ;;
+    uncertain)    echo "## Uncertain facts" ;;
+    brainstormed) echo "## Brainstormed ideas" ;;
+    *) die "unknown bucket: $1" ;;
+  esac
+}
+
+cmd_append() {
+  local bucket="" title="" evidence="" confidence="" target="" id=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --bucket) bucket="$2"; shift 2 ;;
+      --title) title="$2"; shift 2 ;;
+      --evidence) evidence="$2"; shift 2 ;;
+      --confidence) confidence="$2"; shift 2 ;;
+      --target) target="$2"; shift 2 ;;
+      --id) id="$2"; shift 2 ;;
+      *) die "unknown arg: $1" ;;
+    esac
+  done
+
+  [ -n "$bucket" ]     || die "missing --bucket"
+  [ -n "$title" ]      || die "missing --title"
+  [ -n "$evidence" ]   || die "missing --evidence"
+  [ -n "$confidence" ] || die "missing --confidence"
+  [ -n "$target" ]     || die "missing --target"
+
+  local header
+  header=$(bucket_header "$bucket")  # validates bucket name
+
+  ensure_queue_file
+
+  # Dedupe: skip if BOTH title AND target appear in the SAME queue block.
+  # Two independent greps would false-positive when title matches entry A and
+  # target matches entry B — a novel (title,target) pair would be silently dropped.
+  if tt="### $title" tg="**Target:** $target" awk '
+    BEGIN { tt = ENVIRON["tt"]; tg = ENVIRON["tg"] }
+    /^### / { in_b=1; has_t=0; has_g=0 }
+    in_b && $0==tt { has_t=1 }
+    in_b && $0==tg { has_g=1 }
+    in_b && has_t && has_g { found=1; exit }
+    /^---$/ { in_b=0 }
+    END { exit (found ? 0 : 1) }
+  ' "$QUEUE_FILE" 2>/dev/null; then
+    echo "queue: skip duplicate title='$title' target='$target'" >&2
+    return 0
+  fi
+
+  # Ensure the section header exists
+  if ! grep -Fxq -- "$header" "$QUEUE_FILE"; then
+    {
+      echo ""
+      echo "$header"
+      echo ""
+    } >> "$QUEUE_FILE"
+  fi
+
+  # Append entry under the section header
+  local ts
+  ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+  # Build the entry in a temp file (awk -v can't carry newlines)
+  local entry_file
+  entry_file=$(mktemp)
+  local id_line=""
+  [ -n "$id" ] && id_line="**ID:** $id"$'\n'
+
+  cat > "$entry_file" <<EOF
+
+### $title
+
+**Bucket:** $bucket
+**Confidence:** $confidence
+${id_line}**Target:** $target
+**Captured:** $ts
+
+**Evidence:**
+
+> $evidence
+
+---
+EOF
+
+  # Insert entry after the section header (before the next ## or EOF)
+  local queue_tmp
+  queue_tmp=$(mktemp "${QUEUE_FILE}.tmp.XXXXXX")
+  awk -v header="$header" -v entry_file="$entry_file" '
+    BEGIN {
+      inserted = 0
+      in_section = 0
+      entry = ""
+      while ((getline line < entry_file) > 0) {
+        entry = entry (entry == "" ? "" : "\n") line
+      }
+      close(entry_file)
+    }
+    {
+      if ($0 == header) { print; in_section = 1; next }
+      if (in_section && !inserted && /^## /) {
+        print entry
+        inserted = 1
+        in_section = 0
+      }
+      print
+    }
+    END {
+      if (in_section && !inserted) {
+        print entry
+      }
+    }
+  ' "$QUEUE_FILE" > "$queue_tmp" && mv "$queue_tmp" "$QUEUE_FILE"
+
+  rm -f "$entry_file"
+}
+
+cmd_list() {
+  ensure_queue_file
+  if [ ! -s "$QUEUE_FILE" ]; then
+    echo "(queue is empty)"
+    return 0
+  fi
+  cat "$QUEUE_FILE"
+}
+
+cmd_remove() {
+  local title="" target=""
+  while [ $# -gt 0 ]; do
+    case "$1" in
+      --title) title="$2"; shift 2 ;;
+      --target) target="$2"; shift 2 ;;
+      *) die "unknown arg: $1" ;;
+    esac
+  done
+
+  [ -n "$title" ]  || die "missing --title"
+  [ -n "$target" ] || die "missing --target"
+
+  ensure_queue_file
+  [ -s "$QUEUE_FILE" ] || return 0  # empty queue, nothing to remove
+
+  # Block-scan: read entry blocks (### TITLE ... --- terminator). Drop the
+  # block iff BOTH the title line AND the target line match. Keep all others.
+  local queue_tmp
+  queue_tmp=$(mktemp "${QUEUE_FILE}.tmp.XXXXXX")
+  target_title="### $title" target_target="**Target:** $target" awk '
+    BEGIN { target_title = ENVIRON["target_title"]; target_target = ENVIRON["target_target"] }
+    function flush_block(   should_keep) {
+      if (in_block) {
+        should_keep = !(seen_title && seen_target)
+        if (should_keep) printf "%s", buffer
+        else removed_count++
+        buffer = ""
+        in_block = 0
+        seen_title = 0
+        seen_target = 0
+      }
+    }
+    /^### / {
+      flush_block()
+      in_block = 1
+      buffer = $0 "\n"
+      if ($0 == target_title) seen_title = 1
+      next
+    }
+    in_block {
+      buffer = buffer $0 "\n"
+      if ($0 == target_target) seen_target = 1
+      if ($0 == "---") {
+        flush_block()
+      }
+      next
+    }
+    { print }
+    END {
+      flush_block()
+      if (removed_count == 0) exit 2  # signal: no match
+    }
+  ' "$QUEUE_FILE" > "$queue_tmp"
+  local rc=$?
+
+  if [ $rc -eq 0 ]; then
+    mv "$queue_tmp" "$QUEUE_FILE"
+    return 0
+  elif [ $rc -eq 2 ]; then
+    rm -f "$queue_tmp"
+    echo "queue: no entry matched title='$title' target='$target'" >&2
+    return 1
+  else
+    rm -f "$queue_tmp"
+    die "remove failed (awk rc=$rc)"
+  fi
+}
+
+# --- dispatch -----------------------------------------------------------
+[ $# -ge 1 ] || die "usage: queue.sh <append|list|remove> [args]"
+
+SUBCMD="$1"; shift
+case "$SUBCMD" in
+  append) acquire_lock; cmd_append "$@" ;;
+  list)   cmd_list "$@" ;;
+  remove) acquire_lock; cmd_remove "$@" ;;
+  *) die "unknown subcommand: $SUBCMD" ;;
+esac

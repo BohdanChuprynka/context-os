@@ -1,0 +1,25 @@
+{
+  "name": "dream-skill",
+  "description": "Reliably sync durable Claude Code and Codex context into Obsidian with bounded retrieval, transactional review, rollback, and measurable canaries.",
+  "version": "0.4.0",
+  "author": {
+    "name": "Bohdan Chuprynka",
+    "url": "https://github.com/BohdanChuprynka"
+  },
+  "homepage": "https://github.com/BohdanChuprynka/skills/tree/main/dream-skill",
+  "repository": "https://github.com/BohdanChuprynka/skills",
+  "license": "MIT",
+  "hooks": "./hooks/hooks.json",
+  "skills": "./skills",
+  "keywords": [
+    "claude-code",
+    "skill",
+    "obsidian",
+    "knowledge-base",
+    "personal-wiki",
+    "llm",
+    "memory",
+    "batch-sync",
+    "codex"
+  ]
+}
